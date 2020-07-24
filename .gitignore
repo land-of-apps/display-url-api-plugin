@@ -2,7 +2,7 @@
 .idea
 target
 *.class
-
+appmap
 # Package Files #
 *.jar
 *.war
