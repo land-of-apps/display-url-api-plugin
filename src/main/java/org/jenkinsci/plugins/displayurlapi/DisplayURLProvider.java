@@ -1,5 +1,7 @@
 package org.jenkinsci.plugins.displayurlapi;
 
+import edu.umd.cs.findbugs.annotations.NonNull;
+import edu.umd.cs.findbugs.annotations.Nullable;
 import hudson.ExtensionList;
 import hudson.ExtensionPoint;
 import hudson.Util;
@@ -9,83 +11,163 @@ import jenkins.model.Jenkins;
 import org.apache.commons.lang.StringUtils;
 import org.jenkinsci.plugins.displayurlapi.actions.AbstractDisplayAction;
 
-
-import javax.annotation.Nullable;
-
 import static org.apache.commons.lang.StringUtils.isNotEmpty;
 
 /**
- * Generates URLs for well known UI locations for use in notifications (e.g. mailer, HipChat, Slack, IRC, etc)
- * Extensible to allow plugins to override common URLs (e.g. Blue Ocean or another future secondary UI)
+ * Generates URLs for well known UI locations for use in notifications (e.g. mailer, HipChat, Slack,
+ * IRC, etc) Extensible to allow plugins to override common URLs (e.g. Blue Ocean or another future
+ * secondary UI)
  */
 public abstract class DisplayURLProvider implements ExtensionPoint {
 
     /**
+     * Returns the {@link DisplayURLProvider} to use for generating links to be given to users.
+     *
      * @return DisplayURLProvider
      */
     public static DisplayURLProvider get() {
         return DisplayURLProviderImpl.INSTANCE;
     }
 
-    public static Iterable<DisplayURLProvider> all() {
-        return Jenkins.getActiveInstance().getExtensionList(DisplayURLProvider.class);
+    /**
+     * Returns all the {@link DisplayURLProvider} implementations.
+     *
+     * @return all the {@link DisplayURLProvider} implementations.
+     */
+    public static ExtensionList<DisplayURLProvider> all() {
+        return ExtensionList.lookup(DisplayURLProvider.class);
     }
 
     public static DisplayURLProvider getDefault() {
         DisplayURLProvider defaultProvider = getPreferredProvider();
         if (defaultProvider == null) {
-            defaultProvider = ExtensionList.lookup(DisplayURLProvider.class).get(ClassicDisplayURLProvider.class);
+            defaultProvider = ExtensionList.lookup(DisplayURLProvider.class)
+                .get(ClassicDisplayURLProvider.class);
         }
         return defaultProvider;
     }
 
-    /** Fully qualified URL for the Root display URL */
+    /**
+     * Fully qualified URL for the Root display URL
+     */
+    @NonNull
     public String getRoot() {
-        String root = Jenkins.getActiveInstance().getRootUrl();
+        String root = Jenkins.getInstance().getRootUrl();
         if (root == null) {
             root = "http://unconfigured-jenkins-location/";
         }
         return Util.encode(root);
     }
 
-    /** Display name of this provider e.g. "Jenkins Classic", "Blue Ocean", etc */
+    /**
+     * Display name of this provider e.g. "Jenkins Classic", "Blue Ocean", etc
+     */
+    @NonNull
     public String getDisplayName() {
         return this.getClass().getSimpleName();
     }
 
-    /** Name of provider to be used as an id. Do not use i18n */
+    /**
+     * Name of provider to be used as an id. Do not use i18n
+     */
+    @NonNull
     public String getName() {
         return this.getClass().getSimpleName();
     }
 
-    /** Fully qualified URL for a Run */
+    /**
+     * Fully qualified URL for a Run
+     */
+    @NonNull
     public abstract String getRunURL(Run<?, ?> run);
 
-    /** Fully qualified URL for a page that displays changes for a project. */
+    /**
+     * Fully qualified URL for a page that displays artifacts for a Run.
+     */
+    @NonNull
+    public String getArtifactsURL(Run<?, ?> run) {
+        return getRunURL(run) + "artifact";
+    }
+
+    /**
+     * Fully qualified URL for a page that displays changes for a project.
+     */
+    @NonNull
     public abstract String getChangesURL(Run<?, ?> run);
 
-    /** Fully qualified URL for a Jobs home */
+    /**
+     * Fully qualified URL for a page that displays tests for a Run.
+     */
+    public abstract String getTestsURL(Run<?, ?> run);
+
+    /**
+     * Fully qualified URL for a Jobs home
+     */
+    @NonNull
     public abstract String getJobURL(Job<?, ?> job);
 
+    /**
+     * Generates the URLs that the end user will click on, these URLs will direct to a {@link AbstractDisplayAction}
+     * which is then responsible for sending the user to their actual {@link DisplayURLProvider} URL.
+     */
     static class DisplayURLProviderImpl extends ClassicDisplayURLProvider {
 
-        public static final DisplayURLProvider INSTANCE = new DisplayURLProviderImpl();
+        static final DisplayURLProvider INSTANCE = new DisplayURLProviderImpl();
 
-        public static final String DISPLAY_POSTFIX = AbstractDisplayAction.URL_NAME + "/redirect";
+        static final String DISPLAY_POSTFIX = AbstractDisplayAction.URL_NAME + "/redirect";
 
         @Override
+        @NonNull
         public String getRunURL(Run<?, ?> run) {
-            return super.getRunURL(run) + DISPLAY_POSTFIX;
+            try (DisplayURLContext ctx = DisplayURLContext.open()) {
+                if (ctx.run() == null) {
+                    // the link might be generated from another run so we only add this to the context if unset
+                    ctx.run(run);
+                }
+                return DisplayURLDecorator.decorate(ctx, super.getRunURL(run) + DISPLAY_POSTFIX);
+            }
+        }
+
+        @NonNull
+        private String getPageURL(Run<?, ?> run, String page) {
+            try (DisplayURLContext ctx = DisplayURLContext.open()) {
+                if (ctx.run() == null) {
+                    // the link might be generated from another run so we only add this to the context if unset
+                    ctx.run(run);
+                }
+                return DisplayURLDecorator
+                    .decorate(ctx, super.getRunURL(run) + DISPLAY_POSTFIX + "?page=" + page);
+            }
         }
 
         @Override
+        @NonNull
+        public String getArtifactsURL(Run<?, ?> run) {
+            return getPageURL(run, "artifacts");
+        }
+
+        @Override
+        @NonNull
         public String getChangesURL(Run<?, ?> run) {
-            return super.getRunURL(run) + DISPLAY_POSTFIX + "?page=changes";
+            return getPageURL(run, "changes");
         }
 
         @Override
+        @NonNull
+        public String getTestsURL(Run<?, ?> run) {
+            return getPageURL(run, "tests");
+        }
+
+        @Override
+        @NonNull
         public String getJobURL(Job<?, ?> job) {
-            return super.getJobURL(job) + DISPLAY_POSTFIX;
+            try (DisplayURLContext ctx = DisplayURLContext.open()) {
+                if (ctx.job() == null) {
+                    // the link might be generated from another job so we only add this to the context if unset
+                    ctx.job(job);
+                }
+                return DisplayURLDecorator.decorate(ctx, super.getJobURL(job) + DISPLAY_POSTFIX);
+            }
         }
     }
 
@@ -105,7 +187,6 @@ public abstract class DisplayURLProvider implements ExtensionPoint {
         }
         return null;
     }
-
 
     private static final String JENKINS_DISPLAYURL_PROVIDER_ENV = "JENKINS_DISPLAYURL_PROVIDER";
     private static final String JENKINS_DISPLAYURL_PROVIDER_PROP = "jenkins.displayurl.provider";
