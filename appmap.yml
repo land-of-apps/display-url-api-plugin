@@ -1,0 +1,5 @@
+name: jenkins-plugin-display-url-api
+packages:
+- path: jenkins
+- path: hudson
+- path: org.jenkinsci.plugins.displayurlapi
